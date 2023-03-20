@@ -6,7 +6,7 @@ import os
 import numpy as np
 from utils.utilis import generate_K1map
 import torch
-
+import matplotlib.pyplot as plt
 class PoissonData(Dataset):
     def __init__(self, path,norm=True, is_training = True, alpha = 10):
         self.path = path
@@ -58,7 +58,7 @@ def create_dataloader_Poisson(path, batch_size, alpha=10, is_training = True):
 
 
 if __name__ == "__main__":
-    path = "/Users/zhangyunping/PycharmProjects/PLholo/syn_data/data/Nz7_ppv1e-03~5e-03_dz1200um"
-    dataloader, dataset = create_dataloader_Poisson(path,batch_size=2, alpha=10, is_training=True)
+    path = "/Users/zhangyunping/PycharmProjects/PLParticleTracking/data/LLParticle/Nxy256_Nz7_ppv1.1e-04_dz6.9mm_pps13.8um_lambda660nm"
+    dataloader, dataset = create_dataloader_Poisson(path,batch_size=2, alpha=30, is_training=True)
     for batch_i, (y, label, otf3d) in enumerate(dataloader):
         break

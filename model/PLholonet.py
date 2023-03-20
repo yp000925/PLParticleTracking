@@ -14,12 +14,12 @@ import torch
 import torch.nn as nn
 from torch.autograd import Variable
 from utils.utilis import batch_FT2d,batch_iFT2d,autopad
-from utils.dataset import create_dataloader_qis
+from utils.dataset import create_dataloader_Poisson
 from torch.fft import fft2,ifft2,fftshift,ifftshift
 from utils.utilis import PCC,PSNR,accuracy,random_init,tensor2value,plotcube,plot_img,inner_check_vis
 import os
 class PLholonet_block(nn.Module):
-    def __init__(self,d, verboseFlag = False):
+    def __init__(self,d, alpha = 10, verboseFlag = False):
         super(PLholonet_block, self).__init__()
         self.rho1 = torch.nn.Parameter(torch.tensor([1.0],requires_grad=True))
         # torch.nn.init.normal_(self.rho1)
@@ -30,6 +30,7 @@ class PLholonet_block(nn.Module):
         #self.denoiser = ResUNet().to(device)
         self.denoiser = denoiser(d)
         self.flag = verboseFlag
+        self.alpha = alpha
 
     def batch_forward_proj(self,field_batch, otf3d_batch, intensity=True,scale = True):
         '''
@@ -104,9 +105,9 @@ class PLholonet_block(nn.Module):
         x_next = batch_iFT2d(n/d)
         return x_next.real
 
-    def Phi_update(self,x,z,u1,u2,otf3d, K1,K0):
+    def Phi_update(self,x,z,u1,u2,otf3d,y):
         """
-        proximal operator for truncated Poisson signal
+        proximal operator for Poisson signal
         :param x: [B,D,H,W]
         :param z:
         :param u1: [B,1,H,W]
@@ -115,31 +116,11 @@ class PLholonet_block(nn.Module):
         :param K1: [B,1,H,W]
         :return: phi_next [B,1,H,W]
         """
-        # batch_size = x.shape[0]
-        # otf3d_tensor = otf3d.tile([batch_size,1,1,1])
         phi_tilde = self.batch_forward_proj(x,otf3d)-u1
-        # phi_tilde = torch.abs(phi_tilde)
-        # K0 = self.K*torch.ones_like(K1) - K1 # number of zero in each pixel
-
-        # func = lambda y: self.alpha/self.K*(K0-K1/(torch.exp(self.alpha/self.K*y)-1))+self.rho1*(y-phi_tilde)
-        func = lambda y: K0-K1/(torch.exp(y)-1)+self.rho1*(y-phi_tilde)
-
-        # when K1 !=0 solve the one-dimensional equation
-        phimin = 1e-5*torch.ones_like(phi_tilde, dtype=phi_tilde.dtype)
-        phimax = 100*torch.ones_like(phi_tilde, dtype=phi_tilde.dtype)
-        phiave = (phimin + phimax) / 2.0
-
-        for i in range(30):
-            tmp = func(phiave)
-            ind_pos = tmp>0
-            ind_neg = tmp<0
-
-            phimin[ind_neg] = phiave[ind_neg]
-            phimax[ind_pos] = phiave[ind_pos]
-            phiave = (phimin+phimax)/2.0
-
-        phi_next= phiave
+        temp = self.rho1*phi_tilde - self.alpha
+        phi_next = 1/(2*self.rho1)*(temp+torch.sqrt((temp**2)+4*y*self.rho1))
         return phi_next
+
 
 
     def Z_update(self,x,phi,u1,u2,otf3d):
@@ -149,26 +130,26 @@ class PLholonet_block(nn.Module):
         z_next,stage_symloss = self.denoiser(z_tilde)
         return z_next,stage_symloss
 
-    def forward(self,x,phi,z,u1,u2,otf3d, K1, K0 ):
-        z, stage_symloss = self.Z_update(x,phi,u1,u2,otf3d)
-        phi = self.Phi_update(x, z, u1, u2, otf3d, K1,K0)
+    def forward(self,x,phi,z,u1,u2, otf3d, y):
+        z, stage_symloss = self.Z_update(x,phi,u1,u2, otf3d)
+        phi = self.Phi_update(x, z, u1, u2, otf3d, y)
         x = self.X_update(phi, z, u1, u2, otf3d)
         # Lagrangian updates
         # batch_size = x.shape[0]
         # otf3d_tensor = otf3d.tile([batch_size,1,1,1])
-        u1 = u1 + phi - self.batch_forward_proj(x,otf3d)
+        u1 = u1 + phi - self.batch_forward_proj(x, otf3d)
         u2 = u2 +  z - x
         # print(stage_symloss.shape)
         return x,phi,z,u1,u2,stage_symloss
 
 
 class PLholonet(nn.Module):
-    def __init__(self,n,d,sysloss_param = 2e-3,verboseFlag = False):
+    def __init__(self,n,d ,alpha, sysloss_param = 2e-3,verboseFlag = False):
         super(PLholonet, self).__init__()
         self.n = n
         self.blocks = nn.ModuleList([])
         for i in range(n):
-            self.blocks.append(PLholonet_block(d))
+            self.blocks.append(PLholonet_block(d, alpha=alpha))
         self.Batchlayer = torch.nn.BatchNorm2d(d)
         self.Activation = torch.nn.Sigmoid()
         self.sysloss_param = sysloss_param
@@ -179,30 +160,30 @@ class PLholonet(nn.Module):
             if not os.path.isdir(self.dir):
                 os.makedirs(self.dir)
 
-    def forward(self, K1,K0, otf3d):
+    def forward(self, y, otf3d):
         """
-        :param K1: Number of ones in each pixel shape [B,1,W/K,H/K]
+        :param y: observation (hologram)
         :return:
         """
         # initialization
-        device = K1.device
+        device = y.device
 
-        x = self.blocks[0].batch_back_proj(K1,otf3d)
+        x = self.blocks[0].batch_back_proj(y,otf3d)
 
-
-        phi = Variable(K1.data.clone()).to(device)
+        phi = Variable(y.data.clone()).to(device)
         z = Variable(x.data.clone()).to(device)
-        u1 =torch.zeros(K1.size()).to(device)
+        u1 =torch.zeros(y.size()).to(device)
         u2 = torch.zeros(x.size()).to(device)
         stage_symlosses = torch.tensor([0.0]).to(device)
 
         # building the blocks
         for i in range(self.n):
-            x,phi,z,u1,u2,stage_symloss = self.blocks[i](x,phi,z,u1,u2,otf3d,K1,K0) #x,phi,z,u1,u2,otf3d, K1
-            stage_symlosses += torch.mean(torch.pow(stage_symloss,2))
-            # print('stage',i,'\n symloss',stage_symlosses)
-
-        x = self.Batchlayer(x)
+            x,phi,z,u1,u2,stage_symloss = self.blocks[i](x,phi,z,u1,u2,otf3d,y) #x,phi,z,u1,u2,otf3d, y
+            stage_symlosses += torch.sqrt(torch.sum(torch.pow(stage_symloss,2)))/stage_symloss.numel()
+            # stage_symlosses.append(torch.sqrt(torch.sum(torch.pow(stage_symloss,2)))/stage_symloss.numel())
+            # print('stage',i,'\n symloss',torch.sqrt(torch.sum(torch.pow(stage_symloss,2)))/stage_symloss.numel())
+        # _,_,final_z,_,_,_ = self.blocks[i](x,phi,z,u1,u2,otf3d,y) # take the z value (Denoised)
+        # x = self.Batchlayer(final_z)
         x = self.Activation(x)
         # self.iter += 1
         return x, self.sysloss_param*stage_symlosses/self.n
@@ -259,9 +240,10 @@ if __name__ == "__main__":
     # net = PLholonet(n=2,d=5).to(device)
     # # x,phi,z,u1,u2 = net(K1,otf3d)
     # x, stage_symlosses = net(K1,otf3d)
-    path = "/Users/zhangyunping/PycharmProjects/PLholo/syn_data/data/Nz25_Dz0.75e-3_ppv2e-4/train_Nz25_Nxy128_kt30_ks2"
-    dataloader, dataset = create_dataloader_qis(path, batch_size=2, Kt=30, Ks=2, norm=False)
-    model = PLholonet(n=5, d=25,verboseFlag=True)
+    ALPHA = 30 #photon level
+    path = "/Users/zhangyunping/PycharmProjects/PLParticleTracking/data/LLParticle/Nxy256_Nz7_ppv1.1e-04_dz6.9mm_pps13.8um_lambda660nm"
+    dataloader, dataset = create_dataloader_Poisson(path, batch_size=2, alpha=ALPHA, is_training=True)
+    model = PLholonet(n=5, d=7, alpha=ALPHA, verboseFlag=True)
     if torch.cuda.is_available():
         model = torch.nn.DataParallel(model)
         model = model.module.to("cuda")
@@ -270,10 +252,9 @@ if __name__ == "__main__":
         model = torch.nn.DataParallel(model)
         model.device = torch.device('cpu')
 
-    for batch_i, (K1_map,K0_map, label, otf3d, y) in enumerate(dataloader):
-        K1_map = K1_map.to(torch.float32).to(device=model.device)
-        K0_map = K0_map.to(torch.float32).to(device=model.device)
+    for batch_i, (y, label, otf3d) in enumerate(dataloader):
+        y = y.to(device=model.device)
         otf3d = otf3d.to(torch.complex64).to(device=model.device)
         label = label.to(torch.float32).to(device=model.device)
-        x, stage_symlosses = model(K1_map,K0_map,otf3d)
+        x, stage_symlosses = model(y,otf3d)
         break

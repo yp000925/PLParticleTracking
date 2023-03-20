@@ -13,7 +13,7 @@ import time
 import torch
 import logging
 from model.PLholonet import PLholonet
-from utils.dataset import create_dataloader_qis
+from utils.dataset import create_dataloader_Poisson
 from utils.utilis import PCC,PSNR,accuracy,random_init,tensor2value,plotcube,acc_and_recall_with_buffer,prediction_metric
 from torch.optim import Adam
 from tqdm import tqdm
@@ -21,6 +21,7 @@ from argparse import ArgumentParser
 from torch.utils.tensorboard import SummaryWriter
 import torch.optim as optim
 import re
+import matplotlib.pyplot as plt
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def train_epoch(model, opt, dataloader, epoch, freeze = []):
@@ -44,12 +45,11 @@ def train_epoch(model, opt, dataloader, epoch, freeze = []):
     pcc = []
     psnr = []
     opt.zero_grad()
-    for i,(K1_map,K0_map, label, otf3d) in pbar:
-        K1_map = K1_map.to(torch.float32).to(device=model.device)
-        K0_map = K0_map.to(torch.float32).to(device=model.device)
+    for i, (y, label, otf3d) in pbar:
+        y = y.to(device=model.device)
         otf3d = otf3d.to(torch.complex64).to(device=model.device)
         label = label.to(torch.float32).to(device=model.device)
-        x, _sloss = model(K1_map,K0_map,otf3d)
+        x, _sloss = model(y,otf3d)
         # the output prediction should be transmittance where 0 stands for object
         gt = torch.ones_like(label)-label
         # _dloss = torch.mean(torch.pow(x-gt,2))
@@ -97,12 +97,11 @@ def eval_epoch(model, opt, dataloader, epoch):
     predAcc = []
 
     with torch.no_grad():
-        for i,(K1_map, K0_map,label, otf3d) in pbar:
-            K1_map = K1_map.to(torch.float32).to(device=model.device)
-            K0_map = K0_map.to(torch.float32).to(device=model.device)
+        for i,(y,label, otf3d) in pbar:
+            y = y.to(device=model.device)
             otf3d = otf3d.to(torch.complex64).to(device=model.device)
             label = label.to(torch.float32).to(device=model.device)
-            x, _sloss = model(K1_map,K0_map,otf3d)
+            x, _sloss = model(y,otf3d)
             gt = torch.ones_like(label)-label
             gt = gt.to(torch.float32).to(device=model.device)
             # _dloss = torch.mean(torch.pow(x-gt,2))
@@ -138,15 +137,14 @@ def eval_epoch(model, opt, dataloader, epoch):
     return np.mean(sloss),np.mean(dloss),np.mean(total_loss),np.mean(acc),np.mean(pcc),np.mean(psnr),np.mean(recall),np.mean(predAcc)
 
 def visual_after_epoch(model,dataloader,epoch,out_dir=None):
-    K1_map, K0_map, label, otf3d= next(iter(dataloader))
+    y, label, otf3d= next(iter(dataloader))
     # evaluation and visualization the results
     model.eval()
     with torch.no_grad():
-        K1_map = K1_map.to(torch.float32).to(device=model.device)
-        K0_map = K0_map.to(torch.float32).to(device=model.device)
+        y = y.to(torch.float32).to(device=model.device)
         otf3d = otf3d.to(torch.complex64).to(device=model.device)
         label = label.to(torch.float32).to(device=model.device)
-        x, _sloss = model(K1_map,K0_map,otf3d)
+        x, _sloss = model(y,otf3d)
         if len(x.shape)==4:
             x = x[0,:,:,:]
             label = label[0,:,:,:]
@@ -157,6 +155,8 @@ def visual_after_epoch(model,dataloader,epoch,out_dir=None):
         pred_cube = tensor2value(pred_cube)
         gt = tensor2value(label)
         [recall, acc] = prediction_metric(1 - pred_cube, gt, buffer=10, threshold=0.5,grouped=False)
+        file_name = out_dir + "/Hologram.png"
+        plt.imsave(file_name, y[0,0,:,:].cpu().numpy(), cmap='gray')
         plotcube(gt, 'GT', out_dir + "/Gt.png", show=False)
         filename = os.path.join(out_dir, "Pred_Epoch{:d}".format(epoch) + ".png")
         plotcube(pred_cube, 'P_A%.3f' % (acc), filename, show=False)
@@ -164,27 +164,26 @@ def visual_after_epoch(model,dataloader,epoch,out_dir=None):
 if __name__=="__main__":
     random_init(seed=43)
     parser = ArgumentParser(description='PLholonet')
-    parser.add_argument('--batch_sz', type=int, default=2, help='batch size')
-    parser.add_argument('--train_data_path', type=str, default='train_Nz32_Nxy64_kt100_ks16_ppv2e-04~1e-03_pps2e-05',
+    parser.add_argument('--batch_sz', type=int, default=32, help='batch size')
+    parser.add_argument('--train_data_path', type=str, default='train_Nxy256_Nz7_ppv1.1e-04_dz6.9mm_pps13.8um_lambda660nm',
                         help='datapath with params')
-    parser.add_argument('--val_data_path', type=str, default='val_Nz32_Nxy64_kt100_ks16_ppv2e-04~1e-03_pps2e-05',
+    parser.add_argument('--val_data_path', type=str, default='val_Nxy256_Nz7_ppv1.1e-04_dz6.9mm_pps13.8um_lambda660nm',
                         help='datapath with params')
-    parser.add_argument('--data_root', type=str, default='./data/Kmap_Particle', help='data root')
+    parser.add_argument('--data_root', type=str, default='./data/LLParticle', help='data root')
     # parser.add_argument('--obj_type', type=str, default='sim', help='exp or sim')
-    parser.add_argument('--Nz', type=int, default=25, help='depth number')
-    parser.add_argument('--kt', type=int, default=100, help='temporal oversampling ratio')
-    parser.add_argument('--ks', type=int, default=16, help='spatial oversampling ratio')
+    parser.add_argument('--Nz', type=int, default=7, help='depth number')
     parser.add_argument('--dz', type=str, default='1200um', help='depth interval')
     parser.add_argument('--ppv', type=str, default='5e-03', help='ppv')
-    parser.add_argument('--lr_init', type=float, default=1e-4, help='initial learning rate')
-    parser.add_argument('--epochs', type=int, default=800, help='epochs')
+    parser.add_argument('--lr_init', type=float, default=1e-3, help='initial learning rate')
+    parser.add_argument('--epochs', type=int, default=300, help='epochs')
     parser.add_argument('--Nxy', type=int, default=64, help='lateral size')
     parser.add_argument('--gamma', type=float, default=1, help='symmetric loss parameter')
     parser.add_argument('--layer_num', type=int, default=5, help='phase number of PLholoNet')
     parser.add_argument("--visualization", action='store_true', default=True,
                         help='whether output visualization results during training')
+    parser.add_argument('--ALPHA', type=int, default=30, help='Photon level')
 
-    # args = parser.parse_args([])
+# args = parser.parse_args([])
     try:
         args = parser.parse_args()
     except:
@@ -197,7 +196,8 @@ if __name__=="__main__":
     train_data_path = args.train_data_path
     val_data_path = args.val_data_path
     gamma = args.gamma
-
+    ALPHA = args.ALPHA
+    train_params_txt='L' + str(Nd) + '_B' + str(batch_sz) +'_lr' + str(lr) + '_Gamma' + str(gamma)
 
     try:
         print("Compile the params from the dataset")
@@ -205,27 +205,27 @@ if __name__=="__main__":
         params = data_name.split('_')
         args.Nz = [eval(re.findall(r'Nz(\d+)',x)[0]) for x in params if re.findall(r'Nz(\d+)',x)][0]
         args.Nxy = [eval(re.findall(r'Nxy(\d+)',x)[0]) for x in params if re.findall(r'Nxy(\d+)',x)][0]
-        args.kt = [eval(re.findall(r'kt(\d+)',x)[0]) for x in params if re.findall(r'kt(\d+)',x)][0]
-        args.ks = [eval(re.findall(r'ks(\d+)',x)[0]) for x in params if re.findall(r'ks(\d+)',x)][0]
-
     except:
         print("Loading the default value:")
     Nz = args.Nz
-    kt = args.kt
-    ks = args.ks
     Nxy = args.Nxy
 
-    sys_param = train_data_path+'_L' + str(Nd) + '_B' + str(batch_sz) +'_lr' + str(lr) + '_Gamma' + str(gamma)
-
+    sys_param = train_data_path+'_'+ train_params_txt
     train_data_path = os.path.join(args.data_root,train_data_path)
     val_data_path = os.path.join(args.data_root,val_data_path)
 
     out_dir = './experiment/'
     log_dir = './logs/'
-    model_name =  'PLHolo_'+ sys_param
 
-    save_dir = out_dir + model_name
-    log_file = log_dir+model_name +'.log'
+    model_name =  'PLHolo_'+ sys_param
+    # if not os.path.isdir(out_dir + model_name):
+    #     os.makedirs(out_dir + model_name)
+    # if not os.path.isdir(log_dir + model_name):
+    #     os.makedirs(log_dir + model_name)
+    timestr = time.strftime("/%Y-%m-%d-%H_%M_%S",time.localtime())
+    save_dir = out_dir + model_name + timestr
+    log_dir = log_dir +model_name
+    log_file = log_dir + timestr+'.log'
 
     if not os.path.isdir(save_dir):
         os.makedirs(save_dir)
@@ -248,8 +248,6 @@ if __name__=="__main__":
     logger.addHandler(fh)
     # logger.addHandler(sh)
 
-
-
     logger.info("The args are following:")
     logger.info(args)
     print(args)
@@ -260,10 +258,10 @@ if __name__=="__main__":
 
 
     #%% Dataset prepare
-    train_dataloader, train_dataset = create_dataloader_qis(train_data_path,batch_sz,kt,ks,norm=True,lite=True)
-    val_dataloader, val_dataset = create_dataloader_qis(val_data_path,batch_sz,kt,ks,norm=True,lite=True)
+    train_dataloader, train_dataset = create_dataloader_Poisson(train_data_path, batch_size=batch_sz, alpha=ALPHA, is_training=True)
+    val_dataloader, val_dataset = create_dataloader_Poisson(val_data_path, batch_size=batch_sz, alpha=ALPHA, is_training=True)
 
-    model = PLholonet(n=Nd, d=Nz, sysloss_param=args.gamma)
+    model = PLholonet(n=Nd, d=Nz, alpha=ALPHA, sysloss_param=args.gamma)
 
     if torch.cuda.is_available():
         model = torch.nn.DataParallel(model)
@@ -276,7 +274,6 @@ if __name__=="__main__":
 
     optimizer = Adam(model.parameters(),lr=lr)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, patience =3, factor=0.5, threshold=0.001, verbose=True)
-    # otf3d = obj3d(wave_length = 633*nm, img_rows = 64, img_cols=64, slice=30,size = 10*mm, depth = 2*cm).get_otf3d()
 
     # resume
     start_epoch = 0
