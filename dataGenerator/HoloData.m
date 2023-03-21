@@ -9,7 +9,8 @@ data_num = 500;       % number of train data_single
 noise_level =0;
 
 sr = 20e-6; % pixel size of particles
-Nz = 7;  dz = (60e-3-12e-3)/Nz;
+Nz = 15;  
+dz = (60e-3-12e-3)/Nz;
 lambda = 660e-9;     % Illumination wavelength
 z0     = 12e-3;       % Distance between the hologram and the center plane of the 3D object
 z_range = z0 + (0:Nz-1)*dz;   % axial depth span of the object
