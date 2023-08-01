@@ -12,8 +12,8 @@ sr = 20e-6; % pixel size of particles
 Nz = 15;  
 dz = (60e-3-12e-3)/Nz;
 lambda = 660e-9;     % Illumination wavelength
-z0     = 12e-3;       % Distance between the hologram and the center plane of the 3D object
-z_range = z0 + (0:Nz-1)*dz;   % axial depth span of the object
+% z0     = 12e-3;       % Distance between the hologram and the center plane of the 3D object
+% z_range = z0 + (0:Nz-1)*dz;   % axial depth span of the object
 
 
 Nxy = 1024;  pps  = 3.45e-6;   % pixel pitch of CCD camera
@@ -22,7 +22,7 @@ Nxy_network = 256;  pps_network =pps*Nxy/Nxy_network;      % rescaled pixel pitc
 %%
 objType = 'sim';  
 lambda = 660e-9;     % Illumination wavelength
-pps    = 20e-6;      % pixel pitch of CCD camera
+pps    = pps_network;      % real pixel pitch of CCD camera
 z0     = 5e-3;       % Distance between the hologram and the center plane of the 3D object
 
 z_range = z0 + (0:Nz-1)*dz;   % axial depth span of the object

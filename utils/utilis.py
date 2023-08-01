@@ -135,6 +135,10 @@ def NPCC_loss(y_pred,y_true):
     c = torch.mean(vp*vt, dim=1)/(torch.sqrt(torch.mean(vp**2, dim=1)+1e-08) * torch.sqrt(torch.mean(vt ** 2,dim=1)+1e-08))
     loss = torch.mean(1-c**2) # torch.mean(1-c**2)
     return loss
+
+def norm_tensor(x):
+    return (x-torch.min(x))/(torch.max(x)-torch.min(x))
+
 def accuracy(y_pred,y_true):
     """Computes the accuracy for multiple binary predictions"""
     pred = y_pred >= 0.5
@@ -146,6 +150,8 @@ def mse_loss(y_pred,y_true):
     return torch.nn.functional.mse_loss(y_pred,y_true)
 
 def PSNR(y_pred, y_true):
+    y_pred = norm_tensor(y_pred)
+    y_true = norm_tensor(y_true)
     EPS = 1e-8
     mse = torch.mean((y_pred - y_true) ** 2,dim=[2,3])
     score  = -10*torch.log10(mse+EPS)
@@ -560,6 +566,31 @@ def filter_out_margin(cube, margin=[0,5,5]):
     for l in range(bz,z-bz):
         out[l,bx:(x-bx),by:(y-by)] = cube[l,bx:(x-bx),by:(y-by)]
     return out
+
+def generate_otf_torch(wavelength, nx, ny, deltax, deltay, distance, pad_size=None):
+    """
+    Generate the otf from [0,pi] not [-pi/2,pi/2] using torch
+    :param wavelength:
+    :param nx:
+    :param ny:
+    :param deltax:
+    :param deltay:
+    :param distance:
+    :return:
+    """
+    if pad_size:
+        nx = pad_size[0]
+        ny = pad_size[1]
+    r1 = torch.linspace(-nx / 2, nx / 2 - 1, nx)
+    c1 = torch.linspace(-ny / 2, ny / 2 - 1, ny)
+    deltaFx = 1 / (nx * deltax) * r1
+    deltaFy = 1 / (nx * deltay) * c1
+    mesh_qx, mesh_qy = torch.meshgrid(deltaFx, deltaFy)
+    k = 2 * torch.pi / wavelength
+    otf = np.exp(1j * k * distance * torch.sqrt(1 - wavelength ** 2 * (mesh_qx ** 2
+                                                                       + mesh_qy ** 2)))
+    otf = torch.fft.ifftshift(otf)
+    return otf
 
 
 

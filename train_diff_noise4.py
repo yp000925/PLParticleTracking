@@ -4,6 +4,7 @@ Train with 7 slices situation
 """
 import numpy as np
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 import time
 import torch
 import logging
@@ -73,7 +74,7 @@ def train_epoch(model, opt, dataloader, epoch, freeze=[]):
         mem = '%.3gG' % (torch.cuda.memory_reserved() / 1E9 if torch.cuda.is_available() else 0)
 
         info = ('%10s' * 2 + '%10.4g' * 6) % (
-        '%g' % (epoch), mem, _sloss, _dloss, np.mean(total_loss), _acc, _pcc, _psnr)
+            '%g' % (epoch), mem, _sloss, _dloss, np.mean(total_loss), _acc, _pcc, _psnr)
         pbar.set_description(info)
 
     return np.mean(sloss), np.mean(dloss), np.mean(total_loss), np.mean(acc), np.mean(pcc), np.mean(psnr)
@@ -168,25 +169,25 @@ def visual_after_epoch(model, dataloader, epoch, out_dir=None):
 if __name__ == "__main__":
     random_init(seed=43)
     parser = ArgumentParser(description='PLholonet')
-    parser.add_argument('--batch_sz', type=int, default=32, help='batch size')
+    parser.add_argument('--batch_sz', type=int, default=28, help='batch size')
     parser.add_argument('--train_data_path', type=str,
                         default='train_Nxy256_Nz7_ppv1.1e-04_dz6.9mm_pps13.8um_lambda660nm',
                         help='datapath with params')
     parser.add_argument('--val_data_path', type=str, default='val_Nxy256_Nz7_ppv1.1e-04_dz6.9mm_pps13.8um_lambda660nm',
                         help='datapath with params')
-    parser.add_argument('--data_root', type=str, default='./data/LLParticle', help='data root')
+    parser.add_argument('--data_root', type=str, default='/mnt/disk/zhangyp/datasets/LLParticle', help='data root')
     # parser.add_argument('--obj_type', type=str, default='sim', help='exp or sim')
     parser.add_argument('--Nz', type=int, default=7, help='depth number')
     parser.add_argument('--dz', type=str, default='1200um', help='depth interval')
     parser.add_argument('--ppv', type=str, default='5e-03', help='ppv')
     parser.add_argument('--lr_init', type=float, default=1e-3, help='initial learning rate')
-    parser.add_argument('--epochs', type=int, default=300, help='epochs')
+    parser.add_argument('--epochs', type=int, default=100, help='epochs')
     parser.add_argument('--Nxy', type=int, default=64, help='lateral size')
     parser.add_argument('--gamma', type=float, default=1, help='symmetric loss parameter')
     parser.add_argument('--layer_num', type=int, default=5, help='phase number of PLholoNet')
     parser.add_argument("--visualization", action='store_true', default=True,
                         help='whether output visualization results during training')
-    parser.add_argument('--ALPHA', type=int, default=30, help='Photon level')
+    parser.add_argument('--ALPHA', type=int, default=100, help='Photon level')
 
     # args = parser.parse_args([])
     try:
@@ -279,18 +280,18 @@ if __name__ == "__main__":
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer=optimizer, patience=3, factor=0.5, threshold=0.001,
                                                      verbose=True)
 
-    if args.resume:
-        if torch.cuda.is_available():
-            state_dict = torch.load(args.model_path,map_location='cuda')
-            model = torch.nn.DataParallel(model)
-            model = model.module.to("cuda")
-            model.device = torch.device('cuda')
-        else:
-            state_dict = torch.load(args.model_path,map_location='cpu')
-            model.device = torch.device('cpu')
-        model.load_state_dict(state_dict['param'])
-        optimizer = Adam(model.parameters(),lr=lr)
-        optimizer.load_state_dict(state_dict['optimizer'])
+    # if args.resume:
+    #     if torch.cuda.is_available():
+    #         state_dict = torch.load(args.model_path,map_location='cuda')
+    #         model = torch.nn.DataParallel(model)
+    #         model = model.module.to("cuda")
+    #         model.device = torch.device('cuda')
+    #     else:
+    #         state_dict = torch.load(args.model_path,map_location='cpu')
+    #         model.device = torch.device('cpu')
+    #     model.load_state_dict(state_dict['param'])
+    #     optimizer = Adam(model.parameters(),lr=lr)
+    #     optimizer.load_state_dict(state_dict['optimizer'])
 
     # resume
     start_epoch = 0

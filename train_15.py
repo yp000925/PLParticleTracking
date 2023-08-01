@@ -1,11 +1,5 @@
 """
-Train with K0 K1 real value, not normalized
-
-BCE loss
-
-Accuracy as the metric(prediction with buffer) for store the best checkpoint
-
-
+Train with 15 depth slices situation
 """
 import numpy as np
 import os
@@ -207,7 +201,7 @@ if __name__ == "__main__":
     val_data_path = args.val_data_path
     gamma = args.gamma
     ALPHA = args.ALPHA
-    train_params_txt = 'L' + str(Nd) + '_B' + str(batch_sz) + '_lr' + str(lr) + '_Gamma' + str(gamma)
+    train_params_txt = 'L' + str(Nd) + '_B' + str(batch_sz) + '_lr' + str(lr) + '_Gamma' + str(gamma)+'_Alpha' + str(ALPHA)
 
     try:
         print("Compile the params from the dataset")
